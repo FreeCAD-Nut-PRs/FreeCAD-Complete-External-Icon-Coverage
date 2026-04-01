@@ -52,6 +52,7 @@ Example:
 ```text
 :/icons/Sketcher_Constraint.svg
 → ThemeFolder/Sketcher_Constraint.svg
+```
 
 ---
 
