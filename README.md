@@ -52,3 +52,11 @@ Example:
 ```text
 :/icons/Sketcher_Constraint.svg
 → ThemeFolder/Sketcher_Constraint.svg
+
+### Sketcher + Document Tab Icons
+![Sketcher + Document Tab Icons](README_Images/Screenshot-001.jpg)
+
+### Main Toolbar + Workbench Icons
+![Toolbar + Workbench Icons](README_Images/Screenshot-002.jpg)
+
+
