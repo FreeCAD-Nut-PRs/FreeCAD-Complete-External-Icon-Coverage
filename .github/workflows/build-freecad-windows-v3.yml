@@ -55,9 +55,8 @@ jobs:
 
           foreach ($candidate in $candidates) {
             $qt5Dir = Join-Path $candidate "lib\cmake\Qt5"
-            $svgPlugin = Join-Path $candidate "plugins\imageformats\qsvg.dll"
 
-            if ((Test-Path $qt5Dir) -and (Test-Path $svgPlugin)) {
+            if (Test-Path $qt5Dir) {
               $libpackRoot = $candidate
               break
             }
@@ -66,7 +65,7 @@ jobs:
           if (-not $libpackRoot) {
             Write-Host "Contents of ${extractRoot}:"
             Get-ChildItem -Path $extractRoot -Recurse -Depth 3 | Select-Object FullName
-            throw "Could not find a valid LibPack root containing both lib\cmake\Qt5 and plugins\imageformats\qsvg.dll"
+            throw "Could not find a valid LibPack root containing lib\cmake\Qt5"
           }
 
           "FREECAD_LIBPACK_DIR=$libpackRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
