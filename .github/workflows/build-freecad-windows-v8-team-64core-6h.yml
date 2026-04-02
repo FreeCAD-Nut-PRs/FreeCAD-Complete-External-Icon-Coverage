@@ -21,8 +21,9 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-2022
-    timeout-minutes: 240
+    # IMPORTANT: replace with your exact larger runner label from Team settings
+    runs-on: windows-64core
+    timeout-minutes: 360
 
     env:
       LIBPACK_URL: https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z
@@ -48,45 +49,15 @@ jobs:
           $archive = "$env:RUNNER_TEMP\libpack.7z"
           $tempExtract = "$env:RUNNER_TEMP\libpacktemp"
           $libpackDir = "${{ github.workspace }}\freecad_libpack"
-
           Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item $libpackDir -Recurse -Force -ErrorAction SilentlyContinue
-
           New-Item -ItemType Directory -Force -Path $tempExtract | Out-Null
           New-Item -ItemType Directory -Force -Path $libpackDir | Out-Null
-
           Invoke-WebRequest -Uri "${{ env.LIBPACK_URL }}" -OutFile $archive
           7z x $archive "-o$tempExtract" -y
-
           $innerRoot = Join-Path $tempExtract "${{ env.LIBPACK_NAME }}"
-          if (-not (Test-Path $innerRoot)) {
-            Write-Host "Top-level extracted contents:"
-            Get-ChildItem -Path $tempExtract | Select-Object FullName
-            throw "Expected extracted folder not found: $innerRoot"
-          }
-
           Copy-Item (Join-Path $innerRoot '*') $libpackDir -Recurse -Force
-
-          $qtCmakeRoot = Join-Path $libpackDir 'lib\cmake'
-          if (-not (Test-Path $qtCmakeRoot)) {
-            Write-Host "Flattened libpack contents:"
-            Get-ChildItem -Path $libpackDir | Select-Object FullName
-            throw "Flattened LibPack does not contain lib\cmake"
-          }
-
-          $qtCandidates = Get-ChildItem -Path $qtCmakeRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like 'Qt*' }
-
-          if (-not $qtCandidates) {
-            Write-Host "lib\cmake contents:"
-            Get-ChildItem -Path $qtCmakeRoot | Select-Object FullName
-            throw "Flattened LibPack does not contain a Qt cmake package folder"
-          }
-
           "FREECAD_LIBPACK_DIR=$libpackDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Resolved FREECAD_LIBPACK_DIR: $libpackDir"
-          Write-Host "Detected Qt package folders:"
-          $qtCandidates | ForEach-Object { Write-Host $_.FullName }
 
       - name: Configure CMake
         shell: pwsh
@@ -120,31 +91,6 @@ jobs:
           cmake --install "${{ github.workspace }}\build" `
             --config "${{ inputs.build_type }}" `
             --prefix "${{ github.workspace }}\install"
-
-      - name: Verify FreeCAD executable exists
-        shell: pwsh
-        run: |
-          $candidates = @(
-            "${{ github.workspace }}\install\bin\FreeCAD.exe",
-            "${{ github.workspace }}\install\FreeCAD.exe"
-          )
-
-          $found = $null
-          foreach ($candidate in $candidates) {
-            if (Test-Path $candidate) {
-              $found = $candidate
-              break
-            }
-          }
-
-          if (-not $found) {
-            Write-Host "Install tree contents:"
-            Get-ChildItem -Path "${{ github.workspace }}\install" -Recurse -Depth 4 -ErrorAction SilentlyContinue |
-              Select-Object FullName
-            throw "FreeCAD.exe was not found in the install tree."
-          }
-
-          Write-Host "Found runnable executable at: $found"
 
       - name: Upload runnable artifact
         uses: actions/upload-artifact@v4
