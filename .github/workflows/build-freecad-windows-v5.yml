@@ -64,14 +64,26 @@ jobs:
 
           Copy-Item (Join-Path $innerRoot '*') $libpackDir -Recurse -Force
 
-          if (-not (Test-Path (Join-Path $libpackDir 'lib\cmake\Qt5'))) {
+          $qtCmakeRoot = Join-Path $libpackDir 'lib\cmake'
+          if (-not (Test-Path $qtCmakeRoot)) {
             Write-Host "Flattened libpack contents:"
             Get-ChildItem -Path $libpackDir | Select-Object FullName
-            throw "Flattened LibPack does not contain lib\cmake\Qt5"
+            throw "Flattened LibPack does not contain lib\cmake"
+          }
+
+          $qtCandidates = Get-ChildItem -Path $qtCmakeRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like 'Qt*' }
+
+          if (-not $qtCandidates) {
+            Write-Host "lib\cmake contents:"
+            Get-ChildItem -Path $qtCmakeRoot | Select-Object FullName
+            throw "Flattened LibPack does not contain a Qt cmake package folder"
           }
 
           "FREECAD_LIBPACK_DIR=$libpackDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Resolved FREECAD_LIBPACK_DIR: $libpackDir"
+          Write-Host "Detected Qt package folders:"
+          $qtCandidates | ForEach-Object { Write-Host $_.FullName }
 
       - name: Configure CMake
         shell: pwsh
@@ -103,16 +115,11 @@ jobs:
           $artifactDir = "${{ github.workspace }}\artifact\FreeCAD-Windows"
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-          if (Test-Path "${{ github.workspace }}\build\bin") {
-            Copy-Item "${{ github.workspace }}\build\bin" "$artifactDir\bin" -Recurse -Force
-          }
-
-          if (Test-Path "${{ github.workspace }}\build\Mod") {
-            Copy-Item "${{ github.workspace }}\build\Mod" "$artifactDir\Mod" -Recurse -Force
-          }
-
-          if (Test-Path "${{ github.workspace }}\build\data") {
-            Copy-Item "${{ github.workspace }}\build\data" "$artifactDir\data" -Recurse -Force
+          foreach ($p in @("bin","Mod","data")) {
+            $src = Join-Path "${{ github.workspace }}\build" $p
+            if (Test-Path $src) {
+              Copy-Item $src (Join-Path $artifactDir $p) -Recurse -Force
+            }
           }
 
       - name: Upload artifact
