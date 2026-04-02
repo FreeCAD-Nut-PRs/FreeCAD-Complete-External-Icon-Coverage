@@ -33,15 +33,46 @@ jobs:
       - name: Checkout selected branch
         uses: actions/checkout@v4
 
-      - name: Download FreeCAD LibPack
+      - name: Download and locate FreeCAD LibPack
+        id: libpack
         shell: pwsh
         run: |
           $url = "https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z"
           $archive = "$env:RUNNER_TEMP\libpack.7z"
-          $dest = "${{ github.workspace }}\freecad_libpack"
+          $extractRoot = "${{ github.workspace }}\freecad_libpack"
+
+          Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
 
           Invoke-WebRequest -Uri $url -OutFile $archive
-          7z x $archive "-o$dest" -y
+          7z x $archive "-o$extractRoot" -y
+
+          $candidates = @()
+          $candidates += $extractRoot
+          $candidates += Get-ChildItem -Path $extractRoot -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+
+          $libpackRoot = $null
+
+          foreach ($candidate in $candidates) {
+            $qt5Dir = Join-Path $candidate "lib\cmake\Qt5"
+            $svgPlugin = Join-Path $candidate "plugins\imageformats\qsvg.dll"
+
+            if ((Test-Path $qt5Dir) -and (Test-Path $svgPlugin)) {
+              $libpackRoot = $candidate
+              break
+            }
+          }
+
+          if (-not $libpackRoot) {
+            Write-Host "Contents of $extractRoot:"
+            Get-ChildItem -Path $extractRoot -Recurse -Depth 3 | Select-Object FullName
+            throw "Could not find a valid LibPack root containing both lib\cmake\Qt5 and plugins\imageformats\qsvg.dll"
+          }
+
+          "FREECAD_LIBPACK_DIR=$libpackRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "libpack_root=$libpackRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Write-Host "Resolved FREECAD_LIBPACK_DIR: $libpackRoot"
 
       - name: Configure CMake
         shell: pwsh
@@ -49,7 +80,7 @@ jobs:
           cmake -S "${{ github.workspace }}" -B "${{ github.workspace }}\build" `
             -G "Visual Studio 17 2022" `
             -A x64 `
-            -DFREECAD_LIBPACK_DIR="${{ github.workspace }}\freecad_libpack" `
+            -DFREECAD_LIBPACK_DIR="$env:FREECAD_LIBPACK_DIR" `
             -DFREECAD_COPY_LIBPACK_BIN_TO_BUILD=ON `
             -DFREECAD_COPY_DEPEND_DIRS_TO_BUILD=ON `
             -DFREECAD_COPY_PLUGINS_BIN_TO_BUILD=ON
