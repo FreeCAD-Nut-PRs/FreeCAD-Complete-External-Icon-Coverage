@@ -6,9 +6,10 @@ on:
       build_target:
         description: 'CMake target to build'
         required: true
-        default: 'FreeCADGui'
+        default: 'FreeCAD'
         type: choice
         options:
+          - FreeCAD
           - FreeCADGui
       build_type:
         description: 'Build configuration'
@@ -21,7 +22,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     env:
       LIBPACK_URL: https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z
@@ -33,6 +34,8 @@ jobs:
         run: |
           Write-Host "Workflow file branch: ${{ github.workflow_ref }}"
           Write-Host "Code branch/tag selected in Run workflow: ${{ github.ref_name }}"
+          Write-Host "Build target: ${{ inputs.build_target }}"
+          Write-Host "Build type: ${{ inputs.build_type }}"
 
       - name: Checkout selected branch
         uses: actions/checkout@v4
@@ -92,6 +95,7 @@ jobs:
             --preset release `
             -DCMAKE_VS_NO_COMPILE_BATCHING=ON `
             -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}\install" `
             -DFREECAD_USE_PCH=OFF `
             -DFREECAD_RELEASE_PDB=OFF `
             -DFREECAD_LIBPACK_DIR="$env:FREECAD_LIBPACK_DIR" `
@@ -109,23 +113,42 @@ jobs:
             --config "${{ inputs.build_type }}" `
             --target "${{ inputs.build_target }}"
 
-      - name: Prepare artifact folder
+      - name: Install runnable build
         shell: pwsh
         run: |
-          $artifactDir = "${{ github.workspace }}\artifact\FreeCAD-Windows"
-          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          cmake --install "${{ github.workspace }}\build" `
+            --config "${{ inputs.build_type }}" `
+            --prefix "${{ github.workspace }}\install"
 
-          foreach ($p in @("bin","Mod","data")) {
-            $src = Join-Path "${{ github.workspace }}\build" $p
-            if (Test-Path $src) {
-              Copy-Item $src (Join-Path $artifactDir $p) -Recurse -Force
+      - name: Verify FreeCAD executable exists
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${{ github.workspace }}\install\bin\FreeCAD.exe",
+            "${{ github.workspace }}\install\FreeCAD.exe"
+          )
+
+          $found = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              $found = $candidate
+              break
             }
           }
 
-      - name: Upload artifact
+          if (-not $found) {
+            Write-Host "Install tree contents:"
+            Get-ChildItem -Path "${{ github.workspace }}\install" -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+              Select-Object FullName
+            throw "FreeCAD.exe was not found in the install tree."
+          }
+
+          Write-Host "Found runnable executable at: $found"
+
+      - name: Upload runnable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FreeCAD-Windows-${{ inputs.build_target }}-${{ inputs.build_type }}-run${{ github.run_number }}
-          path: ${{ github.workspace }}\artifact\FreeCAD-Windows
+          name: FreeCAD-Windows-runnable-${{ inputs.build_target }}-${{ inputs.build_type }}-run${{ github.run_number }}
+          path: ${{ github.workspace }}\install
           if-no-files-found: error
           retention-days: 14
