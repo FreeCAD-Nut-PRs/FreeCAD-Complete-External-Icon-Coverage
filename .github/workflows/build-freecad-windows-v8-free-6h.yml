@@ -21,8 +21,7 @@ on:
 
 jobs:
   build-windows:
-    # IMPORTANT: replace with your exact larger runner label from Team settings
-    runs-on: windows-64core
+    runs-on: windows-2022
     timeout-minutes: 360
 
     env:
@@ -49,14 +48,18 @@ jobs:
           $archive = "$env:RUNNER_TEMP\libpack.7z"
           $tempExtract = "$env:RUNNER_TEMP\libpacktemp"
           $libpackDir = "${{ github.workspace }}\freecad_libpack"
+
           Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item $libpackDir -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $tempExtract | Out-Null
           New-Item -ItemType Directory -Force -Path $libpackDir | Out-Null
+
           Invoke-WebRequest -Uri "${{ env.LIBPACK_URL }}" -OutFile $archive
           7z x $archive "-o$tempExtract" -y
+
           $innerRoot = Join-Path $tempExtract "${{ env.LIBPACK_NAME }}"
           Copy-Item (Join-Path $innerRoot '*') $libpackDir -Recurse -Force
+
           "FREECAD_LIBPACK_DIR=$libpackDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure CMake
