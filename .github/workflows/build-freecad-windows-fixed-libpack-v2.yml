@@ -64,7 +64,7 @@ jobs:
           }
 
           if (-not $libpackRoot) {
-            Write-Host "Contents of $extractRoot:"
+            Write-Host "Contents of ${extractRoot}:"
             Get-ChildItem -Path $extractRoot -Recurse -Depth 3 | Select-Object FullName
             throw "Could not find a valid LibPack root containing both lib\cmake\Qt5 and plugins\imageformats\qsvg.dll"
           }
