@@ -125,7 +125,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FreeCAD-Windows-${{ github.ref_name }}-${{ inputs.build_target }}-${{ inputs.build_type }}-run${{ github.run_number }}
+          name: FreeCAD-Windows-${{ inputs.build_target }}-${{ inputs.build_type }}-run${{ github.run_number }}
           path: ${{ github.workspace }}\artifact\FreeCAD-Windows
           if-no-files-found: error
           retention-days: 14
