@@ -6,10 +6,10 @@ on:
       build_target:
         description: 'CMake target to build'
         required: true
-        default: 'FreeCAD'
+        default: 'INSTALL'
         type: choice
         options:
-          - FreeCAD
+          - INSTALL
           - FreeCADGui
       build_type:
         description: 'Build configuration'
@@ -106,14 +106,15 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Build
+      - name: Build selected target
         shell: pwsh
         run: |
           cmake --build "${{ github.workspace }}\build" `
             --config "${{ inputs.build_type }}" `
             --target "${{ inputs.build_target }}"
 
-      - name: Install runnable build
+      - name: Install runnable build when not using INSTALL target
+        if: ${{ inputs.build_target != 'INSTALL' }}
         shell: pwsh
         run: |
           cmake --install "${{ github.workspace }}\build" `
@@ -138,7 +139,7 @@ jobs:
 
           if (-not $found) {
             Write-Host "Install tree contents:"
-            Get-ChildItem -Path "${{ github.workspace }}\install" -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+            Get-ChildItem -Path "${{ github.workspace }}\install" -Recurse -Depth 4 -ErrorAction SilentlyContinue |
               Select-Object FullName
             throw "FreeCAD.exe was not found in the install tree."
           }
