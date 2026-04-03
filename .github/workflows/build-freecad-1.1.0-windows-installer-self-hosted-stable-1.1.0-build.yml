@@ -1,0 +1,259 @@
+name: Build FreeCAD 1.1.0 Windows Installer (Self-Hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'FreeCAD source tag/branch to package'
+        required: true
+        default: 'stable/1.1.0-build'
+      build_type:
+        description: 'Build configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+
+jobs:
+  build-windows-installer:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 360
+
+    env:
+      LIBPACK_URL: https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z
+      LIBPACK_NAME: LibPack-1.1.0-v3.1.1.3-Release
+      INSTALL_DIR: ${{ github.workspace }}\install
+      REDIST_DIR: ${{ github.workspace }}\src\WindowsInstaller\MSVCRedist
+      TARGET_INSTALLER_NAME: FreeCAD_1.1.0-Windows-x86_64-py311-installer.exe
+
+    steps:
+      - name: Show selected ref
+        shell: pwsh
+        run: |
+          Write-Host "Running on self-hosted PC"
+          Write-Host "Workflow file branch: ${{ github.workflow_ref }}"
+          Write-Host "Selected source ref: ${{ inputs.source_ref }}"
+          Write-Host "Build type: ${{ inputs.build_type }}"
+
+      - name: Checkout selected FreeCAD source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          submodules: true
+          fetch-depth: 0
+
+      - name: Download and flatten FreeCAD 1.1 LibPack
+        shell: pwsh
+        run: |
+          $archive = "$env:RUNNER_TEMP\libpack.7z"
+          $tempExtract = "$env:RUNNER_TEMP\libpacktemp"
+          $libpackDir = "${{ github.workspace }}\freecad_libpack"
+
+          Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $libpackDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $tempExtract | Out-Null
+          New-Item -ItemType Directory -Force -Path $libpackDir | Out-Null
+
+          Invoke-WebRequest -Uri "${{ env.LIBPACK_URL }}" -OutFile $archive
+          7z x $archive "-o$tempExtract" -y | Out-Null
+
+          $innerRoot = Join-Path $tempExtract "${{ env.LIBPACK_NAME }}"
+          if (-not (Test-Path $innerRoot)) {
+            Get-ChildItem -Path $tempExtract | Select-Object FullName
+            throw "Expected extracted folder not found: $innerRoot"
+          }
+
+          Copy-Item (Join-Path $innerRoot '*') $libpackDir -Recurse -Force
+          "FREECAD_LIBPACK_DIR=$libpackDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B "${{ github.workspace }}\build" "${{ github.workspace }}" `
+            --preset release `
+            -DCMAKE_VS_NO_COMPILE_BATCHING=ON `
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} `
+            -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" `
+            -DFREECAD_USE_PCH=OFF `
+            -DFREECAD_RELEASE_PDB=OFF `
+            -DFREECAD_LIBPACK_DIR="$env:FREECAD_LIBPACK_DIR" `
+            -DFREECAD_COPY_DEPEND_DIRS_TO_BUILD=ON `
+            -DFREECAD_COPY_LIBPACK_BIN_TO_BUILD=ON `
+            -DFREECAD_COPY_PLUGINS_BIN_TO_BUILD=ON
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build and install FreeCAD
+        shell: pwsh
+        run: |
+          cmake --build "${{ github.workspace }}\build" `
+            --config "${{ inputs.build_type }}" `
+            --target INSTALL
+
+      - name: Verify NSIS prerequisites
+        shell: pwsh
+        run: |
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $makensis) {
+            throw "makensis was not found in PATH. Install NSIS 3.x on this self-hosted runner, including the special large-string/logging builds and the Unicode nsProcess plugin."
+          }
+
+          $nsisRoot = Split-Path -Parent $makensis.Source
+          $nsProcessHeader = Join-Path $nsisRoot "Include\nsProcess.nsh"
+          $nsProcessDll = Join-Path $nsisRoot "Plugins\x86-unicode\nsProcess.dll"
+
+          if (-not (Test-Path $nsProcessHeader)) {
+            throw "Missing NSIS prerequisite: $nsProcessHeader"
+          }
+
+          if (-not (Test-Path $nsProcessDll)) {
+            throw "Missing NSIS prerequisite: $nsProcessDll"
+          }
+
+      - name: Collect MSVC redistributable DLLs
+        shell: pwsh
+        run: |
+          $redistDir = "${{ env.REDIST_DIR }}"
+          Remove-Item $redistDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $redistDir | Out-Null
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe not found at $vswhere"
+          }
+
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vsInstall) {
+            throw "Could not locate a Visual Studio installation."
+          }
+
+          $crtRoots = Get-ChildItem -Path (Join-Path $vsInstall "VC\Redist\MSVC") -Directory -ErrorAction Stop |
+            Sort-Object Name -Descending
+
+          if (-not $crtRoots) {
+            throw "Could not locate VC Redist folders under $vsInstall\VC\Redist\MSVC"
+          }
+
+          $crtDir = Join-Path $crtRoots[0].FullName "x64\Microsoft.VC143.CRT"
+          if (-not (Test-Path $crtDir)) {
+            $crtDir = Join-Path $crtRoots[0].FullName "x64\Microsoft.VC142.CRT"
+          }
+
+          if (-not (Test-Path $crtDir)) {
+            throw "Could not locate Microsoft.VC143/142.CRT under $($crtRoots[0].FullName)"
+          }
+
+          $dllNames = @(
+            "vcruntime140.dll",
+            "concrt140.dll",
+            "msvcp140.dll",
+            "vcamp140.dll",
+            "vccorlib140.dll",
+            "vcomp140.dll"
+          )
+
+          foreach ($dll in $dllNames) {
+            $src = Join-Path $crtDir $dll
+            if (Test-Path $src) {
+              Copy-Item $src $redistDir -Force
+            } else {
+              Write-Warning "Did not find $dll in $crtDir"
+            }
+          }
+
+          if (-not (Get-ChildItem $redistDir -File | Measure-Object).Count) {
+            throw "No MSVC redistributable DLLs were copied to $redistDir"
+          }
+
+      - name: Prepare installer settings
+        shell: pwsh
+        run: |
+          $settingsPath = "${{ github.workspace }}\src\WindowsInstaller\Settings.nsh"
+          $installerPath = "${{ github.workspace }}\src\WindowsInstaller\FreeCAD-installer.nsi"
+          $deleteBat = "${{ github.workspace }}\src\WindowsInstaller\Delete.bat"
+
+          if (-not (Test-Path $settingsPath)) {
+            throw "Missing file: $settingsPath"
+          }
+          if (-not (Test-Path $installerPath)) {
+            throw "Missing file: $installerPath"
+          }
+          if (-not (Test-Path $deleteBat)) {
+            throw "Missing file: $deleteBat"
+          }
+
+          $settings = Get-Content $settingsPath -Raw
+          $settings = [regex]::Replace($settings, '(!define\s+FILES_FREECAD\s+)"[^"]*"', ('$1"' + "${{ env.INSTALL_DIR }}" + '"'))
+          $settings = [regex]::Replace($settings, '(!define\s+FILES_DEPS\s+)"[^"]*"', ('$1"' + "${{ env.REDIST_DIR }}" + '"'))
+          Set-Content -Path $settingsPath -Value $settings -Encoding UTF8
+
+          $nsi = Get-Content $installerPath -Raw
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_MAJOR\s+)\S+', '${1}1')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_MINOR\s+)\S+', '${1}1')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_REVISION\s+)\S+', '${1}0')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_EMERGENCY\s+).+', '${1}""')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_BUILD\s+)\S+', '${1}1')
+          Set-Content -Path $installerPath -Value $nsi -Encoding UTF8
+
+          Copy-Item $deleteBat "${{ env.INSTALL_DIR }}\Delete.bat" -Force
+
+      - name: Prune installed tree with Delete.bat
+        shell: pwsh
+        run: |
+          Push-Location "${{ env.INSTALL_DIR }}"
+          cmd /c Delete.bat
+          Pop-Location
+
+      - name: Build official-style NSIS installer
+        shell: pwsh
+        run: |
+          $installerRoot = "${{ github.workspace }}\src\WindowsInstaller"
+          Push-Location $installerRoot
+          & makensis.exe ".\FreeCAD-installer.nsi"
+          Pop-Location
+
+      - name: Collect and rename installer
+        shell: pwsh
+        run: |
+          $searchRoots = @(
+            "${{ github.workspace }}\src\WindowsInstaller",
+            "${{ github.workspace }}\src\WindowsInstaller\Release",
+            "${{ github.workspace }}\build",
+            "${{ github.workspace }}"
+          )
+
+          $exe = $null
+          foreach ($root in $searchRoots) {
+            if (Test-Path $root) {
+              $candidate = Get-ChildItem -Path $root -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match 'FreeCAD.*installer.*\.exe$' } |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1
+              if ($candidate) {
+                $exe = $candidate.FullName
+                break
+              }
+            }
+          }
+
+          if (-not $exe) {
+            throw "Could not locate the built installer .exe"
+          }
+
+          $artifactDir = "${{ github.workspace }}\installer-artifact"
+          Remove-Item $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $target = Join-Path $artifactDir "${{ env.TARGET_INSTALLER_NAME }}"
+          Copy-Item $exe $target -Force
+          Write-Host "Installer ready: $target"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.0-Windows-installer
+          path: ${{ github.workspace }}\installer-artifact\${{ env.TARGET_INSTALLER_NAME }}
+          if-no-files-found: error
+          retention-days: 14
