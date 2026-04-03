@@ -185,21 +185,42 @@ jobs:
             throw "Could not locate a Visual Studio installation."
           }
 
-          $crtRoots = Get-ChildItem -Path (Join-Path $vsInstall "VC\Redist\MSVC") -Directory -ErrorAction Stop |
+          $msvcRedistRoot = Join-Path $vsInstall "VC\Redist\MSVC"
+          if (-not (Test-Path $msvcRedistRoot)) {
+            throw "Could not locate VC Redist root at $msvcRedistRoot"
+          }
+
+          $candidateDirs = Get-ChildItem -Path $msvcRedistRoot -Directory -ErrorAction Stop |
             Sort-Object Name -Descending
 
-          if (-not $crtRoots) {
-            throw "Could not locate VC Redist folders under $vsInstall\VC\Redist\MSVC"
+          if (-not $candidateDirs) {
+            throw "Could not locate any VC Redist folders under $msvcRedistRoot"
           }
 
-          $crtDir = Join-Path $crtRoots[0].FullName "x64\Microsoft.VC143.CRT"
-          if (-not (Test-Path $crtDir)) {
-            $crtDir = Join-Path $crtRoots[0].FullName "x64\Microsoft.VC142.CRT"
+          $crtDir = $null
+          foreach ($dir in $candidateDirs) {
+            $vc143 = Get-ChildItem -Path $dir.FullName -Directory -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -eq "Microsoft.VC143.CRT" } |
+              Select-Object -First 1
+            if ($vc143) {
+              $crtDir = $vc143.FullName
+              break
+            }
+
+            $vc142 = Get-ChildItem -Path $dir.FullName -Directory -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -eq "Microsoft.VC142.CRT" } |
+              Select-Object -First 1
+            if ($vc142) {
+              $crtDir = $vc142.FullName
+              break
+            }
           }
 
-          if (-not (Test-Path $crtDir)) {
-            throw "Could not locate Microsoft.VC143/142.CRT under $($crtRoots[0].FullName)"
+          if (-not $crtDir) {
+            throw "Could not locate Microsoft.VC143.CRT or Microsoft.VC142.CRT anywhere under $msvcRedistRoot"
           }
+
+          Write-Host "Using CRT directory: $crtDir"
 
           $dllNames = @(
             "vcruntime140.dll",
