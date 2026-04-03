@@ -124,14 +124,34 @@ jobs:
         run: |
           cmake --build "${{ github.workspace }}\build" `
             --config "${{ inputs.build_type }}" `
-            --target INSTALL
+            --target INSTALL `
+            --parallel 4
 
       - name: Verify NSIS prerequisites
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
-          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          $makensis = $null
+          $nsisCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+            (Join-Path ${env:ProgramFiles} "NSIS\makensis.exe")
+          )
+
+          foreach ($candidate in $nsisCandidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+              $makensis = @{ Source = $candidate }
+              break
+            }
+          }
+
           if (-not $makensis) {
-            throw "makensis was not found in PATH. Install NSIS 3.x on this self-hosted runner, including the special large-string/logging builds and the Unicode nsProcess plugin."
+            $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $makensis = @{ Source = $cmd.Source }
+            }
+          }
+
+          if (-not $makensis) {
+            throw "makensis.exe was not found. Install NSIS 3.x on this self-hosted runner, typically under C:\Program Files (x86)\NSIS, including the large-string/logging builds and the Unicode nsProcess plugin."
           }
 
           $nsisRoot = Split-Path -Parent $makensis.Source
@@ -145,6 +165,8 @@ jobs:
           if (-not (Test-Path $nsProcessDll)) {
             throw "Missing NSIS prerequisite: $nsProcessDll"
           }
+
+          "NSIS_EXE=$($makensis.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Collect MSVC redistributable DLLs
         shell: powershell -ExecutionPolicy Bypass -File {0}
@@ -245,7 +267,7 @@ jobs:
         run: |
           $installerRoot = "${{ github.workspace }}\src\WindowsInstaller"
           Push-Location $installerRoot
-          & makensis.exe ".\FreeCAD-installer.nsi"
+          & "${{ env.NSIS_EXE }}" ".\FreeCAD-installer.nsi"
           Pop-Location
 
       - name: Collect and rename installer
