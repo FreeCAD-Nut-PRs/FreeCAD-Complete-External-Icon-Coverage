@@ -44,3 +44,4 @@ SetCompressor /SOLID lzma
 !define FILES_FREECAD "D:\FC-test"
 !define FILES_DEPS "G:\FreeCADInst\Installer\MSVCRedist"
 !define FILES_THUMBS "G:\FreeCADInst\Installer\thumbnail"
+; !SetCompressor lzma  ; disabled for faster/lower-memory test packaging
