@@ -1,0 +1,148 @@
+name: Build FreeCAD 1.1.0 macOS Bundles (GitHub Runner, Unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'FreeCAD source tag/branch to build'
+        required: true
+        default: 'stable/1.1.0-build'
+      build_tag:
+        description: 'Artifact/version label used in output names'
+        required: true
+        default: 'FreeCAD_1.1.0'
+
+jobs:
+  build-macos:
+    name: Build ${{ matrix.label }} bundle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 420
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS Intel
+            os: macos-15-intel
+            target_platform: osx-64
+            deploy_target: '10.13'
+            arch_slug: x86_64
+          - label: macOS Apple Silicon
+            os: macos-latest
+            target_platform: osx-arm64
+            deploy_target: '11.0'
+            arch_slug: arm64
+
+    env:
+      TARGET_PLATFORM: ${{ matrix.target_platform }}
+      MACOS_DEPLOYMENT_TARGET: ${{ matrix.deploy_target }}
+      BUILD_TAG: ${{ inputs.build_tag }}
+      MAKE_INSTALLER: 'true'
+      UPLOAD_RELEASE: 'false'
+      MACOS_SIGN_RELEASE: '0'
+      WINDOWS_SIGN_RELEASE: '0'
+
+    steps:
+      - name: Show selected settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Workflow ref: ${{ github.workflow_ref }}"
+          echo "Source ref: ${{ inputs.source_ref }}"
+          echo "Runner: ${{ runner.os }} / ${{ runner.arch }}"
+          echo "Target platform: ${TARGET_PLATFORM}"
+          echo "Deployment target: ${MACOS_DEPLOYMENT_TARGET}"
+          echo "Build tag: ${BUILD_TAG}"
+
+      - name: Checkout selected FreeCAD source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          pixi-version: v0.59.0
+          cache: false
+
+      - name: Write version info and install package environment
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          python3 package/scripts/write_version_info.py ../freecad_version.txt
+          cd package/rattler-build
+          pixi install
+
+      - name: Build unsigned macOS bundle
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          cd package/rattler-build
+          pixi run -e package create_bundle
+
+      - name: Collect generated macOS bundle files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_DIR="${{ github.workspace }}/macos-artifact"
+          mkdir -p "$ARTIFACT_DIR"
+
+          # FreeCAD's packaging output location can vary over time.
+          # Search a few likely roots and copy any generated .dmg or .app bundle.
+          mapfile -d '' FILES < <(find \
+            "${{ github.workspace }}/package/rattler-build" \
+            "${{ github.workspace }}" \
+            -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.tar.bz2' \) -print0 2>/dev/null)
+
+          while IFS= read -r -d '' APPDIR; do
+            FILES+=("$APPDIR")
+          done < <(find \
+            "${{ github.workspace }}/package/rattler-build" \
+            "${{ github.workspace }}" \
+            -type d -name '*.app' -print0 2>/dev/null)
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No .dmg, .app, .zip, or .tar.bz2 output was found."
+            echo "Directory snapshot for debugging:"
+            find "${{ github.workspace }}/package/rattler-build" -maxdepth 4 -print || true
+            exit 1
+          fi
+
+          copied=0
+          for path in "${FILES[@]}"; do
+            base="$(basename "$path")"
+            ext="${base##*.}"
+            name="${base%.*}"
+
+            if [[ "$base" == *.app ]]; then
+              target="$ARTIFACT_DIR/${BUILD_TAG}_macOS_${{ matrix.arch_slug }}.app"
+              rm -rf "$target"
+              cp -R "$path" "$target"
+              copied=1
+            elif [[ "$base" == *.dmg ]]; then
+              target="$ARTIFACT_DIR/${BUILD_TAG}_macOS_${{ matrix.arch_slug }}.dmg"
+              cp "$path" "$target"
+              copied=1
+            else
+              target="$ARTIFACT_DIR/${name}_${{ matrix.arch_slug }}.${ext}"
+              cp "$path" "$target"
+              copied=1
+            fi
+          done
+
+          if [ "$copied" -ne 1 ]; then
+            echo "Nothing was copied into artifact directory."
+            exit 1
+          fi
+
+          echo "Collected files:"
+          find "$ARTIFACT_DIR" -maxdepth 2 -print
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.0-macOS-${{ matrix.arch_slug }}
+          path: ${{ github.workspace }}/macos-artifact
+          if-no-files-found: error
+          retention-days: 14
