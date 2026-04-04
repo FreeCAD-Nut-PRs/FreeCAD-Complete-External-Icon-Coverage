@@ -2,7 +2,17 @@ del /S *_d.*
 del /S *_debug.*
 del /S *.pyc
 del /S *.pdb
+del /S *.obj
+del /S *.ilk
+del /S *.exp
+del /S *.lib
+del /S *.qmlc
+del /S *.jsc
 del /S boost*-gd-*.dll
+rmdir /S /Q Lib\site-packages\PySide6\qml\Assets 2>nul
+rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\Timeline 2>nul
+rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\Tooling 2>nul
+rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\LocalStorage 2>nul
 cd bin
 del assistant.exe
 del Coin4d.dll

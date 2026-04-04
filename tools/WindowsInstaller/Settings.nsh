@@ -10,7 +10,7 @@ These typically need to be modified for each FreeCAD release
 # comment this for testing builds since it will reduce the time to create an installer
 # a lot - for the cost of a much greater file size.
 # So assure it is active for release builds!
-SetCompressor /SOLID lzma
+; SetCompressor /SOLID lzma  ; disabled for faster/lower-memory test packaging
 
 #--------------------------------
 # Version number
@@ -44,4 +44,3 @@ SetCompressor /SOLID lzma
 !define FILES_FREECAD "D:\FC-test"
 !define FILES_DEPS "G:\FreeCADInst\Installer\MSVCRedist"
 !define FILES_THUMBS "G:\FreeCADInst\Installer\thumbnail"
-; !SetCompressor lzma  ; disabled for faster/lower-memory test packaging

@@ -35,7 +35,7 @@ Section -ProgramFiles SecProgramFiles
   # Binaries
   SetOutPath "$INSTDIR\bin"
   # recursively copy all files under bin
-  File /r /x *.obj /x *.pdb /x *.ilk /x *.exp /x *.lib /x *RelWithDebInfo* /x *Downloader* "${FILES_FREECAD}\*"
+  File /r "${FILES_FREECAD}\bin\*.*"
   
   # MSVC redistributable DLLs
   SetOutPath "$INSTDIR\bin"
@@ -49,7 +49,7 @@ Section -ProgramFiles SecProgramFiles
   SetOutPath "$INSTDIR\Ext"
   File /r "${FILES_FREECAD}\Ext\*.*"
   SetOutPath "$INSTDIR\lib"
-  File /r "${FILES_FREECAD}\lib\*.*"
+  File /r /x *.obj /x *.pdb /x *.ilk /x *.exp /x *.lib /x *RelWithDebInfo* /x *Downloader* /x *qml\Assets* "${FILES_FREECAD}\lib\*.*"
   SetOutPath "$INSTDIR\Mod"
   File /r "${FILES_FREECAD}\Mod\*.*"
   SetOutPath "$INSTDIR\resources"
