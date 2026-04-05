@@ -1,0 +1,132 @@
+name: Build FreeCAD 1.1.0 Linux AppImage (GitHub Runner, Unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repository:
+        description: 'Repository to build from'
+        required: true
+        default: 'FreeCAD-Nut-PRs/FreeCAD-Complete-External-Icon-Coverage'
+      source_ref:
+        description: 'Source branch or tag to build'
+        required: true
+        default: 'stable/1.1.0-build'
+      build_tag:
+        description: 'Version label used in the AppImage name'
+        required: true
+        default: '1.1.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freecad-linux-appimage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-appimage:
+    name: Build Linux AppImage (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      TARGET_PLATFORM: linux-64
+      PIXI_ENVIRONMENT: package
+      BUILD_TAG: ${{ inputs.build_tag }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPRESS: 'true'
+      CCACHE_COMPRESSLEVEL: '6'
+      CCACHE_SLOPPINESS: time_macros
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+
+    steps:
+      - name: Checkout patched FreeCAD source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository }}
+          ref: ${{ inputs.source_ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: freecad-linux-appimage-ccache-v1-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-${{ inputs.source_repository }}-${{ inputs.source_ref }}-${{ hashFiles('package/rattler-build/recipe.yaml', 'package/rattler-build/pixi.toml', 'package/rattler-build/pixi.lock', '**/CMakeLists.txt') }}
+          restore-keys: |
+            freecad-linux-appimage-ccache-v1-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-${{ inputs.source_repository }}-${{ inputs.source_ref }}-
+            freecad-linux-appimage-ccache-v1-${{ runner.os }}-${{ env.TARGET_PLATFORM }}-
+
+      - name: Set up Pixi with caching
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          pixi-version: v0.59.0
+          working-directory: ./package/rattler-build
+          cache: true
+          cache-write: true
+          global-cache: true
+          cache-key: freecad-linux-appimage-v1-
+          global-cache-key: freecad-linux-appimage-global-v1-
+
+      - name: Install Linux packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils appstream zsync curl
+
+      - name: Install required Pixi environments
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          cd package/rattler-build
+          pixi install -e default
+          pixi install -e package
+
+      - name: Write version info
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          python3 package/scripts/write_version_info.py ../freecad_version.txt
+
+      - name: Prime ccache stats
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --zero-stats || true
+          ccache --show-config || true
+
+      - name: Build Linux AppImage
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          cd package/rattler-build
+          pixi run -e "${PIXI_ENVIRONMENT}" create_bundle
+
+      - name: Show ccache stats
+        if: always()
+        shell: bash
+        run: ccache --show-stats || true
+
+      - name: Upload Linux AppImage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-${{ inputs.build_tag }}-Linux-AppImage-x86_64
+          path: |
+            package/rattler-build/linux/*.AppImage
+            package/rattler-build/linux/*.zsync
+            package/rattler-build/linux/*SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload debug bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-${{ inputs.build_tag }}-Linux-AppImage-x86_64-debug
+          path: |
+            package/rattler-build
+            .ccache
+          retention-days: 7
