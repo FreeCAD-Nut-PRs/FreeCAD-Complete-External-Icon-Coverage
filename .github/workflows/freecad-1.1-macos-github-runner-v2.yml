@@ -1,0 +1,254 @@
+name: Build FreeCAD 1.1.0 macOS Bundles (GitHub Runner, Unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'FreeCAD source tag/branch to build'
+        required: true
+        default: 'stable/1.1.0-build'
+      build_tag:
+        description: 'Artifact/version label used in output names'
+        required: true
+        default: 'FreeCAD_1.1.0'
+
+concurrency:
+  group: freecad-macos-${{ github.workflow }}-${{ inputs.source_ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos:
+    name: Build ${{ matrix.label }} bundle
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS Intel
+            os: macos-15-intel
+            target_platform: osx-64
+            deploy_target: '10.13'
+            arch_slug: x86_64
+          - label: macOS Apple Silicon
+            os: macos-latest
+            target_platform: osx-arm64
+            deploy_target: '11.0'
+            arch_slug: arm64
+
+    env:
+      TARGET_PLATFORM: ${{ matrix.target_platform }}
+      MACOS_DEPLOYMENT_TARGET: ${{ matrix.deploy_target }}
+      BUILD_TAG: ${{ inputs.build_tag }}
+      MAKE_INSTALLER: 'true'
+      UPLOAD_RELEASE: 'false'
+      MACOS_SIGN_RELEASE: '0'
+      WINDOWS_SIGN_RELEASE: '0'
+      PIXI_ENVIRONMENT: package
+
+    steps:
+      - name: Show selected settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Workflow ref: ${{ github.workflow_ref }}"
+          echo "Source ref: ${{ inputs.source_ref }}"
+          echo "Runner: ${{ runner.os }} / ${{ runner.arch }}"
+          echo "Target platform: ${TARGET_PLATFORM}"
+          echo "Deployment target: ${MACOS_DEPLOYMENT_TARGET}"
+          echo "Build tag: ${BUILD_TAG}"
+          echo "Workspace: ${{ github.workspace }}"
+
+      - name: Checkout selected FreeCAD source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Set up Pixi with caching
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          pixi-version: v0.59.0
+          environments: package
+          cache: true
+          cache-write: true
+          cache-key: freecad-macos-v2-${{ matrix.arch_slug }}-
+
+      - name: Write version info and install package environment
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          python3 package/scripts/write_version_info.py ../freecad_version.txt
+          cd package/rattler-build
+          pixi info
+          pixi install -e "${PIXI_ENVIRONMENT}"
+
+      - name: Build unsigned macOS bundle
+        shell: bash -l {0}
+        run: |
+          set -euo pipefail
+          cd package/rattler-build
+          pixi run -e "${PIXI_ENVIRONMENT}" create_bundle
+
+      - name: Collect generated macOS bundle files
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ARTIFACT_DIR="${{ github.workspace }}/macos-artifact"
+          rm -rf "$ARTIFACT_DIR"
+          mkdir -p "$ARTIFACT_DIR"
+
+          python3 - <<'PY'
+          import os
+          import shutil
+          import sys
+          from pathlib import Path
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          artifact_dir = Path(os.environ['ARTIFACT_DIR'])
+          build_tag = os.environ['BUILD_TAG']
+          arch_slug = os.environ['ARCH_SLUG']
+
+          search_roots = [
+              workspace / 'package' / 'rattler-build',
+              workspace / 'package',
+              workspace,
+          ]
+
+          file_exts = {'.dmg', '.zip', '.tar.bz2', '.pkg'}
+          found_files = []
+          found_apps = []
+
+          def is_bundle_file(path: Path) -> bool:
+              name = path.name.lower()
+              return (
+                  name.endswith('.dmg')
+                  or name.endswith('.zip')
+                  or name.endswith('.tar.bz2')
+                  or name.endswith('.pkg')
+              )
+
+          for root in search_roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob('*'):
+                  if path.is_file() and is_bundle_file(path):
+                      found_files.append(path)
+                  elif path.is_dir() and path.name.endswith('.app'):
+                      found_apps.append(path)
+
+          # Deduplicate while preserving order.
+          def dedupe(paths):
+              seen = set()
+              out = []
+              for p in paths:
+                  key = str(p.resolve()) if p.exists() else str(p)
+                  if key not in seen:
+                      seen.add(key)
+                      out.append(p)
+              return out
+
+          found_files = dedupe(found_files)
+          found_apps = dedupe(found_apps)
+
+          copied = []
+
+          for path in found_files:
+              lower_name = path.name.lower()
+              if lower_name.endswith('.tar.bz2'):
+                  suffix = '.tar.bz2'
+                  stem = path.name[:-8]
+              else:
+                  suffix = path.suffix
+                  stem = path.stem
+
+              if suffix == '.dmg':
+                  target_name = f'{build_tag}_macOS_{arch_slug}.dmg'
+              elif suffix == '.pkg':
+                  target_name = f'{build_tag}_macOS_{arch_slug}.pkg'
+              else:
+                  target_name = f'{stem}_{arch_slug}{suffix}'
+
+              target = artifact_dir / target_name
+              shutil.copy2(path, target)
+              copied.append(target)
+
+          for path in found_apps:
+              target = artifact_dir / f'{build_tag}_macOS_{arch_slug}.app'
+              if target.exists():
+                  shutil.rmtree(target)
+              shutil.copytree(path, target)
+              copied.append(target)
+              break
+
+          if not copied:
+              print('No .dmg, .pkg, .app, .zip, or .tar.bz2 output was found.', file=sys.stderr)
+              print('Searched roots:', file=sys.stderr)
+              for root in search_roots:
+                  print(f'  - {root}', file=sys.stderr)
+              sys.exit(1)
+
+          print('Collected files:')
+          for path in copied:
+              print(f'  - {path}')
+          PY
+        env:
+          ARCH_SLUG: ${{ matrix.arch_slug }}
+
+      - name: Gather macOS build diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG_DIR="${{ github.workspace }}/macos-debug"
+          rm -rf "$DEBUG_DIR"
+          mkdir -p "$DEBUG_DIR"
+
+          {
+            echo "Runner: ${{ runner.os }} / ${{ runner.arch }}"
+            echo "Target platform: ${TARGET_PLATFORM}"
+            echo "Deployment target: ${MACOS_DEPLOYMENT_TARGET}"
+            echo "Build tag: ${BUILD_TAG}"
+            echo "Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            echo "Python:"
+            python3 --version || true
+            echo ""
+            echo "Pixi:"
+            pixi --version || true
+          } > "$DEBUG_DIR/environment.txt"
+
+          {
+            echo "Top-level package tree"
+            find "${{ github.workspace }}/package" -maxdepth 4 -print 2>/dev/null || true
+          } > "$DEBUG_DIR/package-tree.txt"
+
+          {
+            echo "Potential bundle outputs"
+            find "${{ github.workspace }}" \( -name '*.dmg' -o -name '*.pkg' -o -name '*.zip' -o -name '*.tar.bz2' -o -name '*.app' \) -print 2>/dev/null || true
+          } > "$DEBUG_DIR/found-bundles.txt"
+
+          if [ -d "${{ github.workspace }}/macos-artifact" ]; then
+            {
+              echo "Collected artifact tree"
+              find "${{ github.workspace }}/macos-artifact" -maxdepth 4 -print 2>/dev/null || true
+            } > "$DEBUG_DIR/artifact-tree.txt"
+          fi
+
+      - name: Upload macOS artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.0-macOS-${{ matrix.arch_slug }}
+          path: ${{ github.workspace }}/macos-artifact
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS debug logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.0-macOS-${{ matrix.arch_slug }}-debug
+          path: ${{ github.workspace }}/macos-debug
+          if-no-files-found: error
+          retention-days: 14
