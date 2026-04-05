@@ -38,24 +38,39 @@ Section -ProgramFiles SecProgramFiles
   File /r "${FILES_FREECAD}\bin\*.*"
   
   # MSVC redistributable DLLs
-  SetOutPath "$INSTDIR\bin"
-  File "${FILES_DEPS}\*.*"
+  IfFileExists "${FILES_DEPS}\*.*" 0 +3
+    SetOutPath "$INSTDIR\bin"
+    File "${FILES_DEPS}\*.*"
   
   # Others
-  SetOutPath "$INSTDIR\data"
-  File /r "${FILES_FREECAD}\data\*.*"
-  SetOutPath "$INSTDIR\doc"
-  File /r "${FILES_FREECAD}\doc\*.*"
-  SetOutPath "$INSTDIR\Ext"
-  File /r "${FILES_FREECAD}\Ext\*.*"
-  SetOutPath "$INSTDIR\lib"
-  File /r /x *.obj /x *.pdb /x *.ilk /x *.exp /x *.lib /x *RelWithDebInfo* /x *Downloader* /x *qml\Assets* "${FILES_FREECAD}\lib\*.*"
-  SetOutPath "$INSTDIR\Mod"
-  File /r "${FILES_FREECAD}\Mod\*.*"
-  SetOutPath "$INSTDIR\resources"
-  File /r "${FILES_FREECAD}\resources\*.*"
-  SetOutPath "$INSTDIR\translations"
-  File /r "${FILES_FREECAD}\translations\*.*"
+  IfFileExists "${FILES_FREECAD}\data\*.*" 0 +3
+    SetOutPath "$INSTDIR\data"
+    File /r "${FILES_FREECAD}\data\*.*"
+
+  IfFileExists "${FILES_FREECAD}\doc\*.*" 0 +3
+    SetOutPath "$INSTDIR\doc"
+    File /r "${FILES_FREECAD}\doc\*.*"
+
+  IfFileExists "${FILES_FREECAD}\Ext\*.*" 0 +3
+    SetOutPath "$INSTDIR\Ext"
+    File /r "${FILES_FREECAD}\Ext\*.*"
+
+  IfFileExists "${FILES_FREECAD}\lib\*.*" 0 +3
+    SetOutPath "$INSTDIR\lib"
+    File /r /x *.obj /x *.pdb /x *.ilk /x *.exp /x *.lib /x *RelWithDebInfo* /x *Downloader* /x *qml\Assets* "${FILES_FREECAD}\lib\*.*"
+
+  IfFileExists "${FILES_FREECAD}\Mod\*.*" 0 +3
+    SetOutPath "$INSTDIR\Mod"
+    File /r "${FILES_FREECAD}\Mod\*.*"
+
+  IfFileExists "${FILES_FREECAD}\resources\*.*" 0 +3
+    SetOutPath "$INSTDIR\resources"
+    File /r "${FILES_FREECAD}\resources\*.*"
+
+  IfFileExists "${FILES_FREECAD}\translations\*.*" 0 +3
+    SetOutPath "$INSTDIR\translations"
+    File /r "${FILES_FREECAD}\translations\*.*"
+
   SetOutPath "$INSTDIR"
   ; File /r "${FILES_THUMBS}"  ; disabled because thumbnail source path is missing in this installer setup
     
