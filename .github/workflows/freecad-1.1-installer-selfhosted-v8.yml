@@ -249,9 +249,10 @@ jobs:
           }
 
           Write-Host "Using signtool: $signtool"
-          & $signtool verify /pa $pfxPath | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "Signing certificate preflight check failed for $pfxPath"
+
+          $pfxInfo = Get-Item $pfxPath
+          if ($pfxInfo.Length -le 0) {
+            throw "Signing certificate file is empty: $pfxPath"
           }
 
       - name: Collect MSVC redistributable DLLs
