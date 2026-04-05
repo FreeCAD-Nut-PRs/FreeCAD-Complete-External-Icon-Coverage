@@ -371,7 +371,7 @@ jobs:
 
           $quotedSigntool = '"' + $env:SIGNTOOL_EXE.Replace('"', '""') + '"'
           $signing = Get-Content $signingBat -Raw
-          $signing = [regex]::Replace($signing, '(?im)^\s*signtool\.exe', $quotedSigntool)
+          $signing = [regex]::Replace($signing, '(?im)^\s*signtool\.exe\b', $quotedSigntool)
           Set-Content -Path $signingBat -Value $signing -Encoding ASCII
 
           Copy-Item $deleteBat "${{ env.INSTALL_DIR }}\Delete.bat" -Force
