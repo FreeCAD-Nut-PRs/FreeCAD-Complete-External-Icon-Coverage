@@ -248,7 +248,15 @@ jobs:
             throw "signtool.exe was not found. Install the Windows SDK signing tools on this self-hosted runner or add signtool.exe to PATH."
           }
 
+          $signtoolDir = Split-Path -Parent $signtool
+          $signingBatText = Get-Content $signingBat -Raw
+          if ($signingBatText -notmatch '(?i)\bsigntool\.exe\b') {
+            throw "Signing.bat does not appear to call signtool.exe: $signingBat"
+          }
+
           Write-Host "Using signtool: $signtool"
+          "SIGNTOOL_EXE=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $signtoolDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           $pfxInfo = Get-Item $pfxPath
           if ($pfxInfo.Length -le 0) {
@@ -286,31 +294,28 @@ jobs:
 
           $crtDir = $null
           foreach ($dir in $candidateDirs) {
-            $vc143 = Get-ChildItem -Path $dir.FullName -Directory -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -eq "Microsoft.VC143.CRT" } |
-              Select-Object -First 1
-            if ($vc143) {
-              $crtDir = $vc143.FullName
+            $x64Vc143 = Join-Path $dir.FullName "x64\Microsoft.VC143.CRT"
+            if (Test-Path $x64Vc143) {
+              $crtDir = $x64Vc143
               break
             }
 
-            $vc142 = Get-ChildItem -Path $dir.FullName -Directory -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -eq "Microsoft.VC142.CRT" } |
-              Select-Object -First 1
-            if ($vc142) {
-              $crtDir = $vc142.FullName
+            $x64Vc142 = Join-Path $dir.FullName "x64\Microsoft.VC142.CRT"
+            if (Test-Path $x64Vc142) {
+              $crtDir = $x64Vc142
               break
             }
           }
 
           if (-not $crtDir) {
-            throw "Could not locate Microsoft.VC143.CRT or Microsoft.VC142.CRT anywhere under $msvcRedistRoot"
+            throw "Could not locate x64 Microsoft.VC143.CRT or Microsoft.VC142.CRT anywhere under $msvcRedistRoot"
           }
 
           Write-Host "Using CRT directory: $crtDir"
 
           $dllNames = @(
             "vcruntime140.dll",
+            "vcruntime140_1.dll",
             "concrt140.dll",
             "msvcp140.dll",
             "vcamp140.dll",
@@ -338,8 +343,9 @@ jobs:
           $settingsPath = Join-Path $installerRoot "Settings.nsh"
           $installerPath = Join-Path $installerRoot "FreeCAD-installer.nsi"
           $deleteBat = Join-Path $installerRoot "Delete.bat"
+          $signingBat = Join-Path $installerRoot "Signing.bat"
 
-          foreach ($path in @($settingsPath, $installerPath, $deleteBat)) {
+          foreach ($path in @($settingsPath, $installerPath, $deleteBat, $signingBat)) {
             if (-not (Test-Path $path)) {
               throw "Missing file: $path"
             }
@@ -362,6 +368,11 @@ jobs:
           $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_EMERGENCY\s+).+', '${1}""')
           $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_BUILD\s+)\S+', '${1}1')
           Set-Content -Path $installerPath -Value $nsi -Encoding UTF8
+
+          $quotedSigntool = '"' + $env:SIGNTOOL_EXE.Replace('"', '""') + '"'
+          $signing = Get-Content $signingBat -Raw
+          $signing = [regex]::Replace($signing, '(?im)^\s*signtool\.exe', $quotedSigntool)
+          Set-Content -Path $signingBat -Value $signing -Encoding ASCII
 
           Copy-Item $deleteBat "${{ env.INSTALL_DIR }}\Delete.bat" -Force
 
