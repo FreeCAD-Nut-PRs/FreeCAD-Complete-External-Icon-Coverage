@@ -43,7 +43,7 @@ jobs:
       UPLOAD_RELEASE: 'false'
       MACOS_SIGN_RELEASE: '0'
       WINDOWS_SIGN_RELEASE: '0'
-      PIXI_PROJECT_DIR: ${{ github.workspace }}/package/rattler-build
+      PIXI_ENVIRONMENT: package
 
     steps:
       - name: Show selected settings
@@ -57,7 +57,6 @@ jobs:
           echo "Deployment target: ${MACOS_DEPLOYMENT_TARGET}"
           echo "Build tag: ${BUILD_TAG}"
           echo "Workspace: ${{ github.workspace }}"
-          echo "Pixi project dir: ${PIXI_PROJECT_DIR}"
 
       - name: Checkout selected FreeCAD source
         uses: actions/checkout@v4
@@ -66,19 +65,17 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-
       - name: Set up Pixi with caching
         uses: prefix-dev/setup-pixi@v0.9.5
-        env:
-          RUNNER_DEBUG: true
         with:
           pixi-version: v0.59.0
           working-directory: ./package/rattler-build
-          environments: default,package
+          environments: |
+            default
+            package
           cache: true
           cache-write: true
-          cache-key: freecad-macos-v4-${{ matrix.arch_slug }}-
-          log-level: v
+          cache-key: freecad-macos-v6-${{ matrix.arch_slug }}-
 
       - name: Write version info
         shell: bash -l {0}
@@ -88,35 +85,27 @@ jobs:
 
       - name: Show Pixi environment details
         shell: bash -l {0}
-        working-directory: ./package/rattler-build
         run: |
           set -euo pipefail
+          cd package/rattler-build
           pixi info
-          pixi environment list || true
-          echo "Expected default env path: $(pwd)/.pixi/envs/default"
-          echo "Expected package env path: $(pwd)/.pixi/envs/package"
+          pixi list -e default || true
+          pixi list -e package || true
           ls -la .pixi || true
           ls -la .pixi/envs || true
-          ls -la .pixi/envs/default || true
-          ls -la .pixi/envs/package || true
 
       - name: Build unsigned macOS bundle
         shell: bash -l {0}
-        working-directory: ./package/rattler-build
         run: |
           set -euo pipefail
-          test -d .pixi/envs/default
-          test -d .pixi/envs/package
-          pixi run -e package create_bundle
+          cd package/rattler-build
+          pixi run -e "${PIXI_ENVIRONMENT}" create_bundle
 
       - name: Collect generated macOS bundle files
-        if: success()
         shell: bash
-        env:
-          ARCH_SLUG: ${{ matrix.arch_slug }}
-          ARTIFACT_DIR: ${{ github.workspace }}/macos-artifact
         run: |
           set -euo pipefail
+          export ARTIFACT_DIR="${{ github.workspace }}/macos-artifact"
           rm -rf "$ARTIFACT_DIR"
           mkdir -p "$ARTIFACT_DIR"
 
@@ -170,6 +159,7 @@ jobs:
 
           found_files = dedupe(found_files)
           found_apps = dedupe(found_apps)
+
           copied = []
 
           for path in found_files:
@@ -211,6 +201,8 @@ jobs:
           for path in copied:
               print(f'  - {path}')
           PY
+        env:
+          ARCH_SLUG: ${{ matrix.arch_slug }}
 
       - name: Gather macOS build diagnostics
         if: always()
@@ -226,7 +218,6 @@ jobs:
             echo "Target platform: ${TARGET_PLATFORM}"
             echo "Deployment target: ${MACOS_DEPLOYMENT_TARGET}"
             echo "Build tag: ${BUILD_TAG}"
-            echo "Pixi project dir: ${PIXI_PROJECT_DIR}"
             echo "Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
             echo ""
             echo "Python:"
@@ -240,11 +231,6 @@ jobs:
             echo "Top-level package tree"
             find "${{ github.workspace }}/package" -maxdepth 4 -print 2>/dev/null || true
           } > "$DEBUG_DIR/package-tree.txt"
-
-          {
-            echo "Pixi tree"
-            find "${{ github.workspace }}/package/rattler-build/.pixi" -maxdepth 5 -print 2>/dev/null || true
-          } > "$DEBUG_DIR/pixi-tree.txt"
 
           {
             echo "Potential bundle outputs"
