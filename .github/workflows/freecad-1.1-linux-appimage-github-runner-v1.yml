@@ -66,9 +66,7 @@ jobs:
           working-directory: ./package/rattler-build
           cache: true
           cache-write: true
-          global-cache: true
-          cache-key: freecad-linux-appimage-v1-
-          global-cache-key: freecad-linux-appimage-global-v1-
+          cache-key: freecad-linux-appimage-v2-
 
       - name: Install Linux packaging tools
         shell: bash
