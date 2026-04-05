@@ -43,19 +43,19 @@ Section -ProgramFiles SecProgramFiles
   
   # Others
   SetOutPath "$INSTDIR\data"
-  File /r "${FILES_FREECAD}\data\*.*"
+  File /nonfatal /r "${FILES_FREECAD}\data\*.*"
   SetOutPath "$INSTDIR\doc"
   File /r "${FILES_FREECAD}\doc\*.*"
   SetOutPath "$INSTDIR\Ext"
-  File /r "${FILES_FREECAD}\Ext\*.*"
+  File /nonfatal /r "${FILES_FREECAD}\Ext\*.*"
   SetOutPath "$INSTDIR\lib"
   File /r /x *.obj /x *.pdb /x *.ilk /x *.exp /x *.lib /x *RelWithDebInfo* /x *Downloader* /x *qml\Assets* "${FILES_FREECAD}\lib\*.*"
   SetOutPath "$INSTDIR\Mod"
   File /r "${FILES_FREECAD}\Mod\*.*"
   SetOutPath "$INSTDIR\resources"
-  File /r "${FILES_FREECAD}\resources\*.*"
+  File /nonfatal /r "${FILES_FREECAD}\resources\*.*"
   SetOutPath "$INSTDIR\translations"
-  File /r "${FILES_FREECAD}\translations\*.*"
+  File /nonfatal /r "${FILES_FREECAD}\translations\*.*"
   SetOutPath "$INSTDIR"
   File /r "${FILES_THUMBS}"
     
