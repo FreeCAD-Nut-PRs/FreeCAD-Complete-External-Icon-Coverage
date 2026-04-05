@@ -1,105 +1,114 @@
-del /S *_d.*
-del /S *_debug.*
-del /S *.pyc
-del /S *.pdb
-del /S *.obj
-del /S *.ilk
-del /S *.exp
-del /S *.lib
-del /S *.qmlc
-del /S *.jsc
-del /S boost*-gd-*.dll
-rmdir /S /Q Lib\site-packages\PySide6\qml\Assets 2>nul
-rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\Timeline 2>nul
-rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\Tooling 2>nul
-rmdir /S /Q Lib\site-packages\PySide6\qml\QtQuick\LocalStorage 2>nul
-cd bin
-del assistant.exe
-del Coin4d.dll
-del designer.exe
-del freetyped.dll
-del libcrypto-3d.dll
-del libEGLd.dll
-del libGLESv2d.dll
-del libssl-3d.dll
-del linguist.exe
-del qdoc.exe
-del Qt53DAnimationd.dll
-del Qt53DCored.dll
-del Qt53DExtrasd.dll
-del Qt53DInputd.dll
-del Qt53DLogicd.dll
-del Qt53DQuickAnimationd.dll
-del Qt53DQuickd.dll
-del Qt53DQuickExtrasd.dll
-del Qt53DQuickInputd.dll
-del Qt53DQuickRenderd.dll
-del Qt53DQuickScene2Dd.dll
-del Qt53DRenderd.dll
-del Qt5Bluetoothd.dll
-del Qt5Bodymovind.dll
-del Qt5Chartsd.dll
-del Qt5Concurrentd.dll
-del Qt5Cored.dll
-del Qt5DataVisualizationd.dll
-del Qt5DBusd.dll
-del Qt5DesignerComponentsd.dll
-del Qt5Designerd.dll
-del Qt5Gamepadd.dll
-del Qt5Guid.dll
-del Qt5Helpd.dll
-del Qt5Locationd.dll
-del Qt5Multimediad.dll
-del Qt5MultimediaQuickd.dll
-del Qt5MultimediaWidgetsd.dll
-del Qt5NetworkAuthd.dll
-del Qt5Networkd.dll
-del Qt5Nfcd.dll
-del Qt5OpenGLd.dll
-del Qt5Pdfd.dll
-del Qt5PdfWidgetsd.dll
-del Qt5Positioningd.dll
-del Qt5PositioningQuickd.dll
-del Qt5PrintSupportd.dll
-del Qt5Purchasingd.dll
-del Qt5Qmld.dll
-del Qt5QmlModelsd.dll
-del Qt5QmlWorkerScriptd.dll
-del Qt5Quick3DAssetImportd.dll
-del Qt5Quick3Dd.dll
-del Qt5Quick3DRenderd.dll
-del Qt5Quick3DRuntimeRenderd.dll
-del Qt5Quick3DUtilsd.dll
-del Qt5QuickControls2d.dll
-del Qt5Quickd.dll
-del Qt5QuickParticlesd.dll
-del Qt5QuickShapesd.dll
-del Qt5QuickTemplates2d.dll
-del Qt5QuickTestd.dll
-del Qt5QuickWidgetsd.dll
-del Qt5RemoteObjectsd.dll
-del Qt5Scriptd.dll
-del Qt5ScriptToolsd.dll
-del Qt5Scxmld.dll
-del Qt5Sensorsd.dll
-del Qt5SerialBusd.dll
-del Qt5SerialPortd.dll
-del Qt5Sqld.dll
-del Qt5Svgd.dll
-del Qt5Testd.dll
-del Qt5TextToSpeechd.dll
-del Qt5VirtualKeyboardd.dll
-del Qt5WebChanneld.dll
-del Qt5WebEngineCored.dll
-del Qt5WebEngined.dll
-del Qt5WebEngineWidgetsd.dll
-del Qt5WebSocketsd.dll
-del Qt5WebViewd.dll
-del Qt5Widgetsd.dll
-del Qt5WinExtrasd.dll
-del Qt5Xmld.dll
-del Qt5XmlPatternsd.dll
-del QtWebEngineProcessd.exe
-del Quarter1d.dll
-del xerces-c_3_2D.dll
-del zlibd.dll
+@echo off
+setlocal EnableExtensions
+
+rem Hardened installer prune script for FreeCAD staged install tree
+rem Intended to be run from the install root, e.g. %INSTALL_DIR%
+
+cd /d "%~dp0"
+
+echo [Delete.bat] Pruning staged install tree in "%CD%"
+
+call :DeletePatternRecursive "*.pyc"
+call :DeletePatternRecursive "*.pdb"
+call :DeletePatternRecursive "*.obj"
+call :DeletePatternRecursive "*.ilk"
+call :DeletePatternRecursive "*.exp"
+call :DeletePatternRecursive "*.lib"
+call :DeletePatternRecursive "*.qmlc"
+call :DeletePatternRecursive "*.jsc"
+
+rem Remove common development-only executables and debug DLLs from bin
+if exist "bin\" (
+  pushd "bin"
+  call :DeleteIfExists "assistant.exe"
+  call :DeleteIfExists "designer.exe"
+  call :DeleteIfExists "linguist.exe"
+  call :DeleteIfExists "QtWebEngineProcessd.exe"
+
+  call :DeleteIfExists "Qt5Cored.dll"
+  call :DeleteIfExists "Qt5Guid.dll"
+  call :DeleteIfExists "Qt5Networkd.dll"
+  call :DeleteIfExists "Qt5OpenGLd.dll"
+  call :DeleteIfExists "Qt5PrintSupportd.dll"
+  call :DeleteIfExists "Qt5Qmld.dll"
+  call :DeleteIfExists "Qt5QmlModelsd.dll"
+  call :DeleteIfExists "Qt5Quickd.dll"
+  call :DeleteIfExists "Qt5QuickControls2d.dll"
+  call :DeleteIfExists "Qt5QuickTemplates2d.dll"
+  call :DeleteIfExists "Qt5Scriptd.dll"
+  call :DeleteIfExists "Qt5Sqld.dll"
+  call :DeleteIfExists "Qt5Svgd.dll"
+  call :DeleteIfExists "Qt5Testd.dll"
+  call :DeleteIfExists "Qt5WebChanneld.dll"
+  call :DeleteIfExists "Qt5WebEngineCored.dll"
+  call :DeleteIfExists "Qt5WebEngineWidgetsd.dll"
+  call :DeleteIfExists "Qt5Widgetsd.dll"
+  call :DeleteIfExists "Qt5Xmld.dll"
+
+  call :DeleteIfExists "Qt6Cored.dll"
+  call :DeleteIfExists "Qt6Guid.dll"
+  call :DeleteIfExists "Qt6Networkd.dll"
+  call :DeleteIfExists "Qt6OpenGLd.dll"
+  call :DeleteIfExists "Qt6OpenGLWidgetsd.dll"
+  call :DeleteIfExists "Qt6PrintSupportd.dll"
+  call :DeleteIfExists "Qt6Qmld.dll"
+  call :DeleteIfExists "Qt6QmlModelsd.dll"
+  call :DeleteIfExists "Qt6Quickd.dll"
+  call :DeleteIfExists "Qt6QuickControls2d.dll"
+  call :DeleteIfExists "Qt6QuickTemplates2d.dll"
+  call :DeleteIfExists "Qt6Svgd.dll"
+  call :DeleteIfExists "Qt6SvgWidgetsd.dll"
+  call :DeleteIfExists "Qt6Testd.dll"
+  call :DeleteIfExists "Qt6WebChanneld.dll"
+  call :DeleteIfExists "Qt6WebEngineCored.dll"
+  call :DeleteIfExists "Qt6WebEngineQuickd.dll"
+  call :DeleteIfExists "Qt6WebEngineWidgetsd.dll"
+  call :DeleteIfExists "Qt6Widgetsd.dll"
+  call :DeleteIfExists "Qt6Xmld.dll"
+  popd
+) else (
+  echo [Delete.bat] NOTE: "bin" folder not found, skipping bin-specific cleanup.
+)
+
+rem Trim optional PySide6 QML content when present
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\LocalStorage"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Timeline"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Tooling"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Effects"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\ParticleSystem"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick3D\Helpers"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick3D\Assets"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick3D\Effects"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick3D\Helpers\impl"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Controls\Imagine"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Controls\Material"
+call :RemoveDirIfExists "Lib\site-packages\PySide6\qml\QtQuick\Controls\Universal"
+
+rem Legacy path variants sometimes appear depending on build layout
+call :RemoveDirIfExists "lib\site-packages\PySide6\qml\QtQuick\LocalStorage"
+call :RemoveDirIfExists "lib\site-packages\PySide6\qml\QtQuick\Timeline"
+call :RemoveDirIfExists "lib\site-packages\PySide6\qml\QtQuick\Tooling"
+call :RemoveDirIfExists "lib\site-packages\PySide6\qml\QtQuick3D\Assets"
+call :RemoveDirIfExists "lib\site-packages\PySide6\qml\QtQuick3D\Effects"
+
+echo [Delete.bat] Done.
+exit /b 0
+
+:DeletePatternRecursive
+set "PATTERN=%~1"
+for /r %%F in (%PATTERN%) do (
+  if exist "%%~fF" del /f /q "%%~fF" >nul 2>nul
+)
+exit /b 0
+
+:DeleteIfExists
+if exist "%~1" (
+  del /f /q "%~1" >nul 2>nul
+)
+exit /b 0
+
+:RemoveDirIfExists
+if exist "%~1\" (
+  rmdir /s /q "%~1" >nul 2>nul
+)
+exit /b 0

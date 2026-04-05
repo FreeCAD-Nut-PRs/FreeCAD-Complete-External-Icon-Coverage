@@ -90,7 +90,7 @@ Section -Configure
    # if the user is admin, also install the DLL toe preview .FCStd files
    ${if} $MultiUser.Privileges == "Admin"
     # see https://nsis.sourceforge.io/Docs/AppendixB.html#library_install for a description of InstallLib
-    !insertmacro InstallLib REGDLL NOTSHARED NOREBOOT_NOTPROTECTED ${FILES_THUMBS}\FCStdThumbnail.dll $SYSDIR\FCStdThumbnail.dll $SYSDIR
+    ; !insertmacro InstallLib REGDLL NOTSHARED NOREBOOT_NOTPROTECTED ${FILES_THUMBS}\FCStdThumbnail.dll $SYSDIR\FCStdThumbnail.dll $SYSDIR  ; disabled for this installer build
    ${endif}
    # in any case remove the FCStdThumbnail.dll
    RMDir /r "$INSTDIR\thumbnail"

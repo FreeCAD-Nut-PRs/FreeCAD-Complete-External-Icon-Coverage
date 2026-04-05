@@ -36,7 +36,7 @@ ManifestDPIAware true
 # included NSIS files
 !include InstallOptions.nsh
 !include LangFile.nsh
-!include Library.nsh
+; !include Library.nsh  ; no longer needed because thumbnail DLL install/uninstall is disabled
 !include LogicLib.nsh
 !include MUI2.nsh
 !include MultiUser.nsh

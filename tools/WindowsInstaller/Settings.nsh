@@ -43,4 +43,4 @@ These typically need to be modified for each FreeCAD release
 
 !define FILES_FREECAD "D:\FC-test"
 !define FILES_DEPS "G:\FreeCADInst\Installer\MSVCRedist"
-!define FILES_THUMBS "G:\FreeCADInst\Installer\thumbnail"
+; !define FILES_THUMBS ".\thumbnail"  ; thumbnail packaging disabled for this installer build

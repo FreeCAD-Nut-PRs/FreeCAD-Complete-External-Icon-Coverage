@@ -41,8 +41,8 @@ Section "un.FreeCAD" un.SecUnProgramFiles
   
   ${if} $MultiUser.Privileges == "Admin"
    DeleteRegKey HKCR "${APP_REGNAME_DOC}"
-   # see https://nsis.sourceforge.io/Docs/AppendixB.html#library_install for a description of UnInstallLib
-   !insertmacro UnInstallLib REGDLL NOTSHARED NOREBOOT_NOTPROTECTED $SYSDIR\FCStdThumbnail.dll
+   # thumbnail DLL uninstall disabled because thumbnail installation is disabled in this installer build
+   ; !insertmacro UnInstallLib REGDLL NOTSHARED NOREBOOT_NOTPROTECTED $SYSDIR\FCStdThumbnail.dll
   ${endif}
 
   # Uninstaller itself
