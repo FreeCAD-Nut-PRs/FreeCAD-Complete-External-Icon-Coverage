@@ -1,0 +1,437 @@
+name: Build FreeCAD 1.1.0 Windows Installer (Self-Hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'FreeCAD source tag/branch to package'
+        required: true
+        default: 'stable/1.1.0-build'
+      build_type:
+        description: 'Build configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+
+jobs:
+  build-windows-installer:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 720
+
+    env:
+      LIBPACK_URL: https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z
+      LIBPACK_NAME: LibPack-1.1.0-v3.1.1.3-Release
+      INSTALL_DIR: ${{ github.workspace }}\install
+      WINDOWS_INSTALLER_DIR: ${{ github.workspace }}\tools\WindowsInstaller
+      REDIST_DIR: ${{ github.workspace }}\tools\WindowsInstaller\MSVCRedist
+      LIBPACK_CACHE_DIR: C:\actions-runner\cache\LibPack-1.1.0-v3.1.1.3-Release
+      TARGET_INSTALLER_NAME: FreeCAD_1.1.0_win_x64.exe
+
+    steps:
+      - name: Show selected ref
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          Write-Host "Running on self-hosted PC"
+          Write-Host "Workflow file branch: ${{ github.workflow_ref }}"
+          Write-Host "Selected source ref: ${{ inputs.source_ref }}"
+          Write-Host "Build type: ${{ inputs.build_type }}"
+
+      - name: Checkout selected FreeCAD source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          submodules: true
+          fetch-depth: 1
+
+      - name: Validate WindowsInstaller tree
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          if (-not (Test-Path $installerRoot)) {
+            throw "Missing WindowsInstaller folder: $installerRoot"
+          }
+
+          $requiredPaths = @(
+            (Join-Path $installerRoot "FreeCAD-installer.nsi"),
+            (Join-Path $installerRoot "Settings.nsh"),
+            (Join-Path $installerRoot "Delete.bat"),
+            (Join-Path $installerRoot "setup\install.nsh"),
+            (Join-Path $installerRoot "setup\configure.nsh"),
+            (Join-Path $installerRoot "setup\uninstall.nsh"),
+            (Join-Path $installerRoot "icons"),
+            (Join-Path $installerRoot "lang"),
+            (Join-Path $installerRoot "include")
+          )
+
+          $missing = @()
+          foreach ($path in $requiredPaths) {
+            if (-not (Test-Path $path)) {
+              $missing += $path
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "Missing required path: $_" }
+            throw "WindowsInstaller tree validation failed."
+          }
+
+          Write-Host "WindowsInstaller tree validation passed: $installerRoot"
+
+      - name: Prepare cached FreeCAD 1.1 LibPack
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $archive = "$env:RUNNER_TEMP\libpack.7z"
+          $tempExtract = "$env:RUNNER_TEMP\libpacktemp"
+          $workspaceLibpackDir = "${{ github.workspace }}\freecad_libpack"
+          $cacheDir = "${{ env.LIBPACK_CACHE_DIR }}"
+
+          Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $workspaceLibpackDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $tempExtract | Out-Null
+
+          if (-not (Test-Path $cacheDir)) {
+            New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+
+            $sevenZip = $null
+            $sevenZipCandidates = @(
+              (Join-Path ${env:ProgramFiles} "7-Zip\7z.exe"),
+              (Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe")
+            )
+
+            foreach ($candidate in $sevenZipCandidates) {
+              if ($candidate -and (Test-Path $candidate)) {
+                $sevenZip = $candidate
+                break
+              }
+            }
+
+            if (-not $sevenZip) {
+              $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
+              if ($cmd) {
+                $sevenZip = $cmd.Source
+              }
+            }
+
+            if (-not $sevenZip) {
+              throw "7-Zip not found. Install 7-Zip on the self-hosted runner or add 7z.exe to PATH."
+            }
+
+            Invoke-WebRequest -Uri "${{ env.LIBPACK_URL }}" -OutFile $archive
+            & $sevenZip x $archive "-o$tempExtract" -y | Out-Null
+
+            $innerRoot = Join-Path $tempExtract "${{ env.LIBPACK_NAME }}"
+            if (-not (Test-Path $innerRoot)) {
+              Get-ChildItem -Path $tempExtract | Select-Object FullName
+              throw "Expected extracted folder not found: $innerRoot"
+            }
+
+            Copy-Item (Join-Path $innerRoot '*') $cacheDir -Recurse -Force
+          } else {
+            Write-Host "Using cached LibPack from $cacheDir"
+          }
+
+          New-Item -ItemType Directory -Force -Path $workspaceLibpackDir | Out-Null
+          Copy-Item (Join-Path $cacheDir '*') $workspaceLibpackDir -Recurse -Force
+          "FREECAD_LIBPACK_DIR=$workspaceLibpackDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure CMake
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          cmake -B "${{ github.workspace }}\build" "${{ github.workspace }}" `
+            --preset release `
+            -DCMAKE_VS_NO_COMPILE_BATCHING=ON `
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} `
+            -DCMAKE_INSTALL_PREFIX="${{ env.INSTALL_DIR }}" `
+            -DFREECAD_USE_PCH=OFF `
+            -DFREECAD_RELEASE_PDB=OFF `
+            -DFREECAD_LIBPACK_DIR="$env:FREECAD_LIBPACK_DIR" `
+            -DFREECAD_COPY_DEPEND_DIRS_TO_BUILD=ON `
+            -DFREECAD_COPY_LIBPACK_BIN_TO_BUILD=ON `
+            -DFREECAD_COPY_PLUGINS_BIN_TO_BUILD=ON
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build FreeCAD
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          cmake --build "${{ github.workspace }}\build" `
+            --config "${{ inputs.build_type }}" `
+            --parallel 4
+
+      - name: Install FreeCAD
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          cmake --install "${{ github.workspace }}\build" `
+            --config "${{ inputs.build_type }}"
+
+      - name: Verify NSIS prerequisites
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $makensis = $null
+          $nsisCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
+            (Join-Path ${env:ProgramFiles} "NSIS\makensis.exe")
+          )
+
+          foreach ($candidate in $nsisCandidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+              $makensis = @{ Source = $candidate }
+              break
+            }
+          }
+
+          if (-not $makensis) {
+            $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $makensis = @{ Source = $cmd.Source }
+            }
+          }
+
+          if (-not $makensis) {
+            throw "makensis.exe was not found. Install NSIS 3.x on this self-hosted runner, typically under C:\Program Files (x86)\NSIS, including the large-string/logging builds and the Unicode nsProcess plugin."
+          }
+
+          $nsisRoot = Split-Path -Parent $makensis.Source
+          $nsProcessHeader = Join-Path $nsisRoot "Include\nsProcess.nsh"
+          $nsProcessDll = Join-Path $nsisRoot "Plugins\x86-unicode\nsProcess.dll"
+
+          if (-not (Test-Path $nsProcessHeader)) {
+            throw "Missing NSIS prerequisite: $nsProcessHeader"
+          }
+
+          if (-not (Test-Path $nsProcessDll)) {
+            throw "Missing NSIS prerequisite: $nsProcessDll"
+          }
+
+          "NSIS_EXE=$($makensis.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify signing prerequisites
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          $signingBat = Join-Path $installerRoot "Signing.bat"
+          $pfxPath = Join-Path $installerRoot "FCweborg.pfx"
+
+          if (-not (Test-Path $signingBat)) {
+            throw "Missing signing script: $signingBat"
+          }
+
+          if (-not (Test-Path $pfxPath)) {
+            throw "Missing signing certificate file: $pfxPath"
+          }
+
+          $signtool = $null
+          $signtoolCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\x64\signtool.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\App Certification Kit\signtool.exe"),
+            (Join-Path ${env:ProgramFiles} "Windows Kits\10\bin\x64\signtool.exe")
+          )
+
+          foreach ($candidate in $signtoolCandidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+              $signtool = $candidate
+              break
+            }
+          }
+
+          if (-not $signtool) {
+            $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $signtool = $cmd.Source
+            }
+          }
+
+          if (-not $signtool) {
+            throw "signtool.exe was not found. Install the Windows SDK signing tools on this self-hosted runner or add signtool.exe to PATH."
+          }
+
+          $signtoolDir = Split-Path -Parent $signtool
+          $signingBatText = Get-Content $signingBat -Raw
+          if ($signingBatText -notmatch '(?i)\bsigntool\.exe\b') {
+            throw "Signing.bat does not appear to call signtool.exe: $signingBat"
+          }
+
+          Write-Host "Using signtool: $signtool"
+          "SIGNTOOL_EXE=$signtool" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $signtoolDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          $pfxInfo = Get-Item $pfxPath
+          if ($pfxInfo.Length -le 0) {
+            throw "Signing certificate file is empty: $pfxPath"
+          }
+
+      - name: Collect MSVC redistributable DLLs
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $redistDir = "${{ env.REDIST_DIR }}"
+          Remove-Item $redistDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $redistDir | Out-Null
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe not found at $vswhere"
+          }
+
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vsInstall) {
+            throw "Could not locate a Visual Studio installation."
+          }
+
+          $msvcRedistRoot = Join-Path $vsInstall "VC\Redist\MSVC"
+          if (-not (Test-Path $msvcRedistRoot)) {
+            throw "Could not locate VC Redist root at $msvcRedistRoot"
+          }
+
+          $candidateDirs = Get-ChildItem -Path $msvcRedistRoot -Directory -ErrorAction Stop |
+            Sort-Object Name -Descending
+
+          if (-not $candidateDirs) {
+            throw "Could not locate any VC Redist folders under $msvcRedistRoot"
+          }
+
+          $crtDir = $null
+          foreach ($dir in $candidateDirs) {
+            $x64Vc143 = Join-Path $dir.FullName "x64\Microsoft.VC143.CRT"
+            if (Test-Path $x64Vc143) {
+              $crtDir = $x64Vc143
+              break
+            }
+
+            $x64Vc142 = Join-Path $dir.FullName "x64\Microsoft.VC142.CRT"
+            if (Test-Path $x64Vc142) {
+              $crtDir = $x64Vc142
+              break
+            }
+          }
+
+          if (-not $crtDir) {
+            throw "Could not locate x64 Microsoft.VC143.CRT or Microsoft.VC142.CRT anywhere under $msvcRedistRoot"
+          }
+
+          Write-Host "Using CRT directory: $crtDir"
+
+          $dllNames = @(
+            "vcruntime140.dll",
+            "vcruntime140_1.dll",
+            "concrt140.dll",
+            "msvcp140.dll",
+            "vcamp140.dll",
+            "vccorlib140.dll",
+            "vcomp140.dll"
+          )
+
+          foreach ($dll in $dllNames) {
+            $src = Join-Path $crtDir $dll
+            if (Test-Path $src) {
+              Copy-Item $src $redistDir -Force
+            } else {
+              Write-Warning "Did not find $dll in $crtDir"
+            }
+          }
+
+          if (-not (Get-ChildItem $redistDir -File | Measure-Object).Count) {
+            throw "No MSVC redistributable DLLs were copied to $redistDir"
+          }
+
+      - name: Prepare installer settings
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          $settingsPath = Join-Path $installerRoot "Settings.nsh"
+          $installerPath = Join-Path $installerRoot "FreeCAD-installer.nsi"
+          $deleteBat = Join-Path $installerRoot "Delete.bat"
+          $signingBat = Join-Path $installerRoot "Signing.bat"
+
+          foreach ($path in @($settingsPath, $installerPath, $deleteBat, $signingBat)) {
+            if (-not (Test-Path $path)) {
+              throw "Missing file: $path"
+            }
+          }
+
+          $settings = Get-Content $settingsPath -Raw
+          $settings = [regex]::Replace($settings, '(!define\s+FILES_FREECAD\s+)"[^"]*"', ('$1"' + "${{ env.INSTALL_DIR }}" + '"'))
+          $settings = [regex]::Replace($settings, '(!define\s+FILES_DEPS\s+)"[^"]*"', ('$1"' + "${{ env.REDIST_DIR }}" + '"'))
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_MAJOR\s+)\S+', '${1}1')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_MINOR\s+)\S+', '${1}1')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_REVISION\s+)\S+', '${1}0')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_EMERGENCY\s+).+', '${1}""')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_BUILD\s+)\S+', '${1}1')
+          Set-Content -Path $settingsPath -Value $settings -Encoding UTF8
+
+          $nsi = Get-Content $installerPath -Raw
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_MAJOR\s+)\S+', '${1}1')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_MINOR\s+)\S+', '${1}1')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_REVISION\s+)\S+', '${1}0')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_EMERGENCY\s+).+', '${1}""')
+          $nsi = [regex]::Replace($nsi, '(!define\s+APP_VERSION_BUILD\s+)\S+', '${1}1')
+          Set-Content -Path $installerPath -Value $nsi -Encoding UTF8
+
+          $quotedSigntool = '"' + $env:SIGNTOOL_EXE.Replace('"', '""') + '"'
+          $signing = Get-Content $signingBat -Raw
+          $signing = [regex]::Replace($signing, '(?im)^\s*signtool\.exe', $quotedSigntool)
+          Set-Content -Path $signingBat -Value $signing -Encoding ASCII
+
+          Copy-Item $deleteBat "${{ env.INSTALL_DIR }}\Delete.bat" -Force
+
+      - name: Prune installed tree with Delete.bat
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          Push-Location "${{ env.INSTALL_DIR }}"
+          cmd /c Delete.bat
+          Pop-Location
+
+      - name: Build official-style NSIS installer
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          Push-Location $installerRoot
+          & "${{ env.NSIS_EXE }}" ".\FreeCAD-installer.nsi"
+          Pop-Location
+
+      - name: Collect and rename installer
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $searchRoots = @(
+            "${{ env.WINDOWS_INSTALLER_DIR }}",
+            "${{ env.WINDOWS_INSTALLER_DIR }}\Release"
+          )
+
+          $exeCandidates = @()
+          foreach ($root in $searchRoots) {
+            if (Test-Path $root) {
+              $exeCandidates += Get-ChildItem -Path $root -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                  $_.Name -match '^FreeCAD.*\.exe$' -and
+                  $_.Name -match 'installer'
+                }
+            }
+          }
+
+          if (-not $exeCandidates.Count) {
+            throw "Could not locate the built installer .exe in the NSIS output folders"
+          }
+
+          $exe = $exeCandidates |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          Write-Host "Discovered built installer: $($exe.FullName)"
+
+          $artifactDir = "${{ github.workspace }}\installer-artifact"
+          Remove-Item $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $target = Join-Path $artifactDir "${{ env.TARGET_INSTALLER_NAME }}"
+          Copy-Item $exe.FullName $target -Force
+          Write-Host "Installer ready: $target"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeCAD-1.1.0-Windows-installer
+          path: ${{ github.workspace }}\installer-artifact\${{ env.TARGET_INSTALLER_NAME }}
+          if-no-files-found: error
+          retention-days: 14
