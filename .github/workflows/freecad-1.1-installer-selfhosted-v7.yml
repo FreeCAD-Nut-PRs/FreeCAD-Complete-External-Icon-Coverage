@@ -18,12 +18,13 @@ on:
 jobs:
   build-windows-installer:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 360
+    timeout-minutes: 720
 
     env:
       LIBPACK_URL: https://github.com/FreeCAD/FreeCAD-LibPack/releases/download/3.1.1.3/LibPack-1.1.0-v3.1.1.3-Release.7z
       LIBPACK_NAME: LibPack-1.1.0-v3.1.1.3-Release
       INSTALL_DIR: ${{ github.workspace }}\install
+      WINDOWS_INSTALLER_DIR: ${{ github.workspace }}\tools\WindowsInstaller
       REDIST_DIR: ${{ github.workspace }}\tools\WindowsInstaller\MSVCRedist
       LIBPACK_CACHE_DIR: C:\actions-runner\cache\LibPack-1.1.0-v3.1.1.3-Release
       TARGET_INSTALLER_NAME: FreeCAD_1.1.0_win_x64.exe
@@ -43,6 +44,40 @@ jobs:
           ref: ${{ inputs.source_ref }}
           submodules: true
           fetch-depth: 1
+
+      - name: Validate WindowsInstaller tree
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          if (-not (Test-Path $installerRoot)) {
+            throw "Missing WindowsInstaller folder: $installerRoot"
+          }
+
+          $requiredPaths = @(
+            (Join-Path $installerRoot "FreeCAD-installer.nsi"),
+            (Join-Path $installerRoot "Settings.nsh"),
+            (Join-Path $installerRoot "Delete.bat"),
+            (Join-Path $installerRoot "setup\install.nsh"),
+            (Join-Path $installerRoot "setup\configure.nsh"),
+            (Join-Path $installerRoot "setup\uninstall.nsh"),
+            (Join-Path $installerRoot "icons"),
+            (Join-Path $installerRoot "lang"),
+            (Join-Path $installerRoot "include")
+          )
+
+          $missing = @()
+          foreach ($path in $requiredPaths) {
+            if (-not (Test-Path $path)) {
+              $missing += $path
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "Missing required path: $_" }
+            throw "WindowsInstaller tree validation failed."
+          }
+
+          Write-Host "WindowsInstaller tree validation passed: $installerRoot"
 
       - name: Prepare cached FreeCAD 1.1 LibPack
         shell: powershell -ExecutionPolicy Bypass -File {0}
@@ -173,6 +208,52 @@ jobs:
 
           "NSIS_EXE=$($makensis.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Verify signing prerequisites
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          $signingBat = Join-Path $installerRoot "Signing.bat"
+          $pfxPath = Join-Path $installerRoot "FCweborg.pfx"
+
+          if (-not (Test-Path $signingBat)) {
+            throw "Missing signing script: $signingBat"
+          }
+
+          if (-not (Test-Path $pfxPath)) {
+            throw "Missing signing certificate file: $pfxPath"
+          }
+
+          $signtool = $null
+          $signtoolCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\x64\signtool.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\App Certification Kit\signtool.exe"),
+            (Join-Path ${env:ProgramFiles} "Windows Kits\10\bin\x64\signtool.exe")
+          )
+
+          foreach ($candidate in $signtoolCandidates) {
+            if ($candidate -and (Test-Path $candidate)) {
+              $signtool = $candidate
+              break
+            }
+          }
+
+          if (-not $signtool) {
+            $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $signtool = $cmd.Source
+            }
+          }
+
+          if (-not $signtool) {
+            throw "signtool.exe was not found. Install the Windows SDK signing tools on this self-hosted runner or add signtool.exe to PATH."
+          }
+
+          Write-Host "Using signtool: $signtool"
+          & $signtool verify /pa $pfxPath | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signing certificate preflight check failed for $pfxPath"
+          }
+
       - name: Collect MSVC redistributable DLLs
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
@@ -252,23 +333,25 @@ jobs:
       - name: Prepare installer settings
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
-          $settingsPath = "${{ github.workspace }}\tools\WindowsInstaller\Settings.nsh"
-          $installerPath = "${{ github.workspace }}\tools\WindowsInstaller\FreeCAD-installer.nsi"
-          $deleteBat = "${{ github.workspace }}\tools\WindowsInstaller\Delete.bat"
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
+          $settingsPath = Join-Path $installerRoot "Settings.nsh"
+          $installerPath = Join-Path $installerRoot "FreeCAD-installer.nsi"
+          $deleteBat = Join-Path $installerRoot "Delete.bat"
 
-          if (-not (Test-Path $settingsPath)) {
-            throw "Missing file: $settingsPath"
-          }
-          if (-not (Test-Path $installerPath)) {
-            throw "Missing file: $installerPath"
-          }
-          if (-not (Test-Path $deleteBat)) {
-            throw "Missing file: $deleteBat"
+          foreach ($path in @($settingsPath, $installerPath, $deleteBat)) {
+            if (-not (Test-Path $path)) {
+              throw "Missing file: $path"
+            }
           }
 
           $settings = Get-Content $settingsPath -Raw
           $settings = [regex]::Replace($settings, '(!define\s+FILES_FREECAD\s+)"[^"]*"', ('$1"' + "${{ env.INSTALL_DIR }}" + '"'))
           $settings = [regex]::Replace($settings, '(!define\s+FILES_DEPS\s+)"[^"]*"', ('$1"' + "${{ env.REDIST_DIR }}" + '"'))
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_MAJOR\s+)\S+', '${1}1')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_MINOR\s+)\S+', '${1}1')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_REVISION\s+)\S+', '${1}0')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_EMERGENCY\s+).+', '${1}""')
+          $settings = [regex]::Replace($settings, '(!define\s+APP_VERSION_BUILD\s+)\S+', '${1}1')
           Set-Content -Path $settingsPath -Value $settings -Encoding UTF8
 
           $nsi = Get-Content $installerPath -Raw
@@ -291,7 +374,7 @@ jobs:
       - name: Build official-style NSIS installer
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
-          $installerRoot = "${{ github.workspace }}\tools\WindowsInstaller"
+          $installerRoot = "${{ env.WINDOWS_INSTALLER_DIR }}"
           Push-Location $installerRoot
           & "${{ env.NSIS_EXE }}" ".\FreeCAD-installer.nsi"
           Pop-Location
@@ -300,36 +383,37 @@ jobs:
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
           $searchRoots = @(
-            "${{ github.workspace }}\tools\WindowsInstaller",
-            "${{ github.workspace }}\tools\WindowsInstaller\Release",
-            "${{ github.workspace }}\build",
-            "${{ github.workspace }}"
+            "${{ env.WINDOWS_INSTALLER_DIR }}",
+            "${{ env.WINDOWS_INSTALLER_DIR }}\Release"
           )
 
-          $exe = $null
+          $exeCandidates = @()
           foreach ($root in $searchRoots) {
             if (Test-Path $root) {
-              $candidate = Get-ChildItem -Path $root -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match 'FreeCAD.*installer.*\.exe$' } |
-                Sort-Object LastWriteTime -Descending |
-                Select-Object -First 1
-              if ($candidate) {
-                $exe = $candidate.FullName
-                break
-              }
+              $exeCandidates += Get-ChildItem -Path $root -Filter *.exe -Recurse -ErrorAction SilentlyContinue |
+                Where-Object {
+                  $_.Name -match '^FreeCAD.*\.exe$' -and
+                  $_.Name -match 'installer'
+                }
             }
           }
 
-          if (-not $exe) {
-            throw "Could not locate the built installer .exe"
+          if (-not $exeCandidates.Count) {
+            throw "Could not locate the built installer .exe in the NSIS output folders"
           }
+
+          $exe = $exeCandidates |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          Write-Host "Discovered built installer: $($exe.FullName)"
 
           $artifactDir = "${{ github.workspace }}\installer-artifact"
           Remove-Item $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
           $target = Join-Path $artifactDir "${{ env.TARGET_INSTALLER_NAME }}"
-          Copy-Item $exe $target -Force
+          Copy-Item $exe.FullName $target -Force
           Write-Host "Installer ready: $target"
 
       - name: Upload installer artifact
